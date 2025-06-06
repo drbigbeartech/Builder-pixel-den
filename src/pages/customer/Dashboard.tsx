@@ -22,121 +22,161 @@ import {
   MapPin,
   Clock,
   ShoppingBag,
+  Loader2,
 } from "lucide-react";
-import {
-  mockProducts,
-  mockServices,
-  categories,
-  locations,
-} from "@/lib/mockData";
+import { getProducts, getServices } from "@/lib/database";
+import { hasValidSupabaseConfig } from "@/lib/supabase";
+import { mockProducts, mockServices } from "@/lib/mockData";
 import {
   SearchFilters as Filters,
   Product,
   Service,
 } from "@/types/marketplace";
 import { getCurrentUser } from "@/lib/auth";
+import { useToast } from "@/hooks/use-toast";
 
 const CustomerDashboard = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<Filters>({});
-  const [filteredProducts, setFilteredProducts] = useState(mockProducts);
-  const [filteredServices, setFilteredServices] = useState(mockServices);
+  const [products, setProducts] = useState<any[]>([]);
+  const [services, setServices] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("products");
   const user = getCurrentUser();
+  const { toast } = useToast();
+  const hasSupabase = hasValidSupabaseConfig();
 
   useEffect(() => {
-    applyFilters();
+    loadData();
   }, [filters, searchQuery]);
 
-  const applyFilters = () => {
-    let products = [...mockProducts];
-    let services = [...mockServices];
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      if (hasSupabase) {
+        // Use real Supabase data
+        const [productsData, servicesData] = await Promise.all([
+          getProducts({ ...filters, query: searchQuery }),
+          getServices({ ...filters, query: searchQuery }),
+        ]);
 
-    // Apply search query
-    if (searchQuery) {
-      products = products.filter(
-        (product) =>
-          product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          product.description
-            .toLowerCase()
-            .includes(searchQuery.toLowerCase()) ||
-          product.category.toLowerCase().includes(searchQuery.toLowerCase()),
-      );
+        setProducts(productsData || []);
+        setServices(servicesData || []);
+      } else {
+        // Use mock data with client-side filtering
+        let filteredProducts = [...mockProducts];
+        let filteredServices = [...mockServices];
 
-      services = services.filter(
-        (service) =>
-          service.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          service.description
-            .toLowerCase()
-            .includes(searchQuery.toLowerCase()) ||
-          service.category.toLowerCase().includes(searchQuery.toLowerCase()),
-      );
+        // Apply search query
+        if (searchQuery) {
+          filteredProducts = filteredProducts.filter(
+            (product) =>
+              product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              product.description
+                .toLowerCase()
+                .includes(searchQuery.toLowerCase()) ||
+              product.category
+                .toLowerCase()
+                .includes(searchQuery.toLowerCase()),
+          );
+
+          filteredServices = filteredServices.filter(
+            (service) =>
+              service.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              service.description
+                .toLowerCase()
+                .includes(searchQuery.toLowerCase()) ||
+              service.category
+                .toLowerCase()
+                .includes(searchQuery.toLowerCase()),
+          );
+        }
+
+        // Apply category filter
+        if (filters.category && filters.category !== "All Categories") {
+          filteredProducts = filteredProducts.filter(
+            (product) => product.category === filters.category,
+          );
+          filteredServices = filteredServices.filter(
+            (service) => service.category === filters.category,
+          );
+        }
+
+        // Apply location filter
+        if (filters.location && filters.location !== "All Areas") {
+          filteredProducts = filteredProducts.filter(
+            (product) => product.location.area === filters.location,
+          );
+          filteredServices = filteredServices.filter(
+            (service) => service.location.area === filters.location,
+          );
+        }
+
+        // Apply price filter
+        if (filters.priceMin !== undefined || filters.priceMax !== undefined) {
+          const minPrice = filters.priceMin || 0;
+          const maxPrice = filters.priceMax || Infinity;
+          filteredProducts = filteredProducts.filter(
+            (product) => product.price >= minPrice && product.price <= maxPrice,
+          );
+          filteredServices = filteredServices.filter(
+            (service) => service.price >= minPrice && service.price <= maxPrice,
+          );
+        }
+
+        // Apply rating filter
+        if (filters.rating) {
+          filteredProducts = filteredProducts.filter(
+            (product) => product.rating >= filters.rating!,
+          );
+          filteredServices = filteredServices.filter(
+            (service) => service.rating >= filters.rating!,
+          );
+        }
+
+        // Apply availability filter
+        if (filters.availability) {
+          filteredProducts = filteredProducts.filter(
+            (product) => product.availability > 0,
+          );
+        }
+
+        // Apply new arrivals filter
+        if (filters.newArrivals) {
+          const oneWeekAgo = new Date();
+          oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+          filteredProducts = filteredProducts.filter(
+            (product) => product.createdAt > oneWeekAgo,
+          );
+          filteredServices = filteredServices.filter(
+            (service) => service.createdAt > oneWeekAgo,
+          );
+        }
+
+        // Apply sorting
+        const sortFn = getSortFunction(filters.sortBy);
+        if (sortFn) {
+          filteredProducts.sort(sortFn);
+          filteredServices.sort(sortFn as any);
+        }
+
+        setProducts(filteredProducts);
+        setServices(filteredServices);
+      }
+    } catch (error: any) {
+      console.error("Error loading data:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load marketplace data. Using demo data.",
+        variant: "destructive",
+      });
+
+      // Fallback to mock data
+      setProducts(mockProducts);
+      setServices(mockServices);
+    } finally {
+      setIsLoading(false);
     }
-
-    // Apply category filter
-    if (filters.category && filters.category !== "All Categories") {
-      products = products.filter(
-        (product) => product.category === filters.category,
-      );
-      services = services.filter(
-        (service) => service.category === filters.category,
-      );
-    }
-
-    // Apply location filter
-    if (filters.location && filters.location !== "All Areas") {
-      products = products.filter(
-        (product) => product.location.area === filters.location,
-      );
-      services = services.filter(
-        (service) => service.location.area === filters.location,
-      );
-    }
-
-    // Apply price filter
-    if (filters.priceMin !== undefined || filters.priceMax !== undefined) {
-      const minPrice = filters.priceMin || 0;
-      const maxPrice = filters.priceMax || Infinity;
-      products = products.filter(
-        (product) => product.price >= minPrice && product.price <= maxPrice,
-      );
-      services = services.filter(
-        (service) => service.price >= minPrice && service.price <= maxPrice,
-      );
-    }
-
-    // Apply rating filter
-    if (filters.rating) {
-      products = products.filter(
-        (product) => product.rating >= filters.rating!,
-      );
-      services = services.filter(
-        (service) => service.rating >= filters.rating!,
-      );
-    }
-
-    // Apply availability filter
-    if (filters.availability) {
-      products = products.filter((product) => product.availability > 0);
-    }
-
-    // Apply new arrivals filter
-    if (filters.newArrivals) {
-      const oneWeekAgo = new Date();
-      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-      products = products.filter((product) => product.createdAt > oneWeekAgo);
-      services = services.filter((service) => service.createdAt > oneWeekAgo);
-    }
-
-    // Apply sorting
-    const sortFn = getSortFunction(filters.sortBy);
-    if (sortFn) {
-      products.sort(sortFn);
-      services.sort(sortFn as any);
-    }
-
-    setFilteredProducts(products);
-    setFilteredServices(services);
   };
 
   const getSortFunction = (sortBy?: string) => {
@@ -149,9 +189,10 @@ const CustomerDashboard = () => {
         return (a: Product, b: Product) => b.rating - a.rating;
       case "newest":
         return (a: Product, b: Product) =>
-          b.createdAt.getTime() - a.createdAt.getTime();
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       case "popularity":
-        return (a: Product, b: Product) => b.reviews.length - a.reviews.length;
+        return (a: Product, b: Product) =>
+          (b.reviews?.length || 0) - (a.reviews?.length || 0);
       default:
         return null;
     }
@@ -161,7 +202,7 @@ const CustomerDashboard = () => {
     setSearchQuery(query);
   };
 
-  const renderServiceCard = (service: Service) => (
+  const renderServiceCard = (service: any) => (
     <Card
       key={service.id}
       className="overflow-hidden hover:shadow-lg transition-all duration-200"
@@ -194,21 +235,22 @@ const CustomerDashboard = () => {
               <Star
                 key={i}
                 className={`h-4 w-4 ${
-                  i < Math.floor(service.rating)
+                  i < Math.floor(service.rating || 0)
                     ? "fill-yellow-400 text-yellow-400"
                     : "text-gray-300"
                 }`}
               />
             ))}
             <span className="text-sm text-muted-foreground ml-1">
-              {service.rating} ({service.reviews.length})
+              {service.rating || 0} ({service.reviews?.length || 0})
             </span>
           </div>
 
           <div className="flex items-center gap-1 text-sm text-muted-foreground">
             <MapPin className="h-3 w-3" />
             <span>
-              {service.location.area}, {service.location.city}
+              {service.provider?.area || service.location?.area},{" "}
+              {service.provider?.city || service.location?.city}
             </span>
           </div>
 
@@ -252,9 +294,18 @@ const CustomerDashboard = () => {
             Welcome back, {user.name}!
           </h1>
           <p className="text-muted-foreground">
-            Discover amazing products and services in {user.location.area},{" "}
-            {user.location.city}
+            Discover amazing products and services in{" "}
+            {user.location?.area || user.area},{" "}
+            {user.location?.city || user.city}
           </p>
+          {!hasSupabase && (
+            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="text-sm text-yellow-800">
+                <strong>Demo Mode:</strong> Using mock data. Set up Supabase
+                credentials in .env file for real-time functionality.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
@@ -281,26 +332,33 @@ const CustomerDashboard = () => {
                     className="flex items-center gap-2"
                   >
                     <ShoppingBag className="h-4 w-4" />
-                    Products ({filteredProducts.length})
+                    Products ({products.length})
                   </TabsTrigger>
                   <TabsTrigger
                     value="services"
                     className="flex items-center gap-2"
                   >
                     <Calendar className="h-4 w-4" />
-                    Services ({filteredServices.length})
+                    Services ({services.length})
                   </TabsTrigger>
                 </TabsList>
+
+                {isLoading && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading...
+                  </div>
+                )}
               </div>
 
               <TabsContent value="products" className="space-y-6">
-                {filteredProducts.length > 0 ? (
+                {!isLoading && products.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                    {filteredProducts.map((product) => (
+                    {products.map((product) => (
                       <ProductCard key={product.id} product={product} />
                     ))}
                   </div>
-                ) : (
+                ) : !isLoading ? (
                   <Card>
                     <CardContent className="flex flex-col items-center justify-center py-12">
                       <ShoppingBag className="h-12 w-12 text-muted-foreground mb-4" />
@@ -322,15 +380,28 @@ const CustomerDashboard = () => {
                       </Button>
                     </CardContent>
                   </Card>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    {[...Array(6)].map((_, i) => (
+                      <Card key={i} className="animate-pulse">
+                        <div className="h-48 bg-muted"></div>
+                        <CardContent className="p-4 space-y-2">
+                          <div className="h-4 bg-muted rounded"></div>
+                          <div className="h-3 bg-muted rounded w-3/4"></div>
+                          <div className="h-6 bg-muted rounded w-1/2"></div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
                 )}
               </TabsContent>
 
               <TabsContent value="services" className="space-y-6">
-                {filteredServices.length > 0 ? (
+                {!isLoading && services.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {filteredServices.map(renderServiceCard)}
+                    {services.map(renderServiceCard)}
                   </div>
-                ) : (
+                ) : !isLoading ? (
                   <Card>
                     <CardContent className="flex flex-col items-center justify-center py-12">
                       <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
@@ -352,6 +423,22 @@ const CustomerDashboard = () => {
                       </Button>
                     </CardContent>
                   </Card>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {[...Array(4)].map((_, i) => (
+                      <Card key={i} className="animate-pulse">
+                        <CardHeader>
+                          <div className="h-4 bg-muted rounded"></div>
+                          <div className="h-3 bg-muted rounded w-3/4"></div>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                          <div className="h-6 bg-muted rounded w-1/2"></div>
+                          <div className="h-3 bg-muted rounded w-2/3"></div>
+                          <div className="h-10 bg-muted rounded"></div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
                 )}
               </TabsContent>
             </Tabs>

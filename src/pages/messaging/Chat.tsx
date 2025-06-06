@@ -4,7 +4,6 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Header } from "@/components/layout/Header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -16,193 +15,247 @@ import {
   Search,
   MessageSquare,
   Image as ImageIcon,
+  Loader2,
 } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
+import {
+  getConversations,
+  getMessages,
+  sendMessage,
+  markMessagesAsRead,
+  subscribeToMessages,
+} from "@/lib/database";
+import { hasValidSupabaseConfig } from "@/lib/supabase";
 import { mockUsers } from "@/lib/mockData";
-import { Message, Chat as ChatType, User } from "@/types/marketplace";
+import { useToast } from "@/hooks/use-toast";
 
 const Chat = () => {
   const user = getCurrentUser();
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
+  const hasSupabase = hasValidSupabaseConfig();
 
-  // Mock chat data
-  const mockChats: ChatType[] = [
-    {
-      id: "1",
-      participants: [user!, mockUsers[1]],
-      messages: [
-        {
-          id: "1",
-          senderId: mockUsers[1].id,
-          sender: mockUsers[1],
-          recipientId: user?.id!,
-          recipient: user!,
-          content:
-            "Hello! I saw your product listing for tomatoes. Are they still available?",
-          type: "text",
-          timestamp: new Date("2024-01-25T10:30:00"),
-          read: true,
-        },
-        {
-          id: "2",
-          senderId: user?.id!,
-          sender: user!,
-          recipientId: mockUsers[1].id,
-          recipient: mockUsers[1],
-          content:
-            "Yes, they are! Fresh from the farm. How many kilograms would you like?",
-          type: "text",
-          timestamp: new Date("2024-01-25T10:32:00"),
-          read: true,
-        },
-        {
-          id: "3",
-          senderId: mockUsers[1].id,
-          sender: mockUsers[1],
-          recipientId: user?.id!,
-          recipient: user!,
-          content: "I would like 5kg please. What about delivery to Avondale?",
-          type: "text",
-          timestamp: new Date("2024-01-25T10:35:00"),
-          read: true,
-        },
-        {
-          id: "4",
-          senderId: user?.id!,
-          sender: user!,
-          recipientId: mockUsers[1].id,
-          recipient: mockUsers[1],
-          content:
-            "Perfect! Delivery to Avondale is $2 extra. Total would be $19.50. Can deliver today afternoon.",
-          type: "text",
-          timestamp: new Date("2024-01-25T10:40:00"),
-          read: false,
-        },
-      ],
-      lastMessage: {
-        id: "4",
-        senderId: user?.id!,
-        sender: user!,
-        recipientId: mockUsers[1].id,
-        recipient: mockUsers[1],
-        content:
-          "Perfect! Delivery to Avondale is $2 extra. Total would be $19.50. Can deliver today afternoon.",
-        type: "text",
-        timestamp: new Date("2024-01-25T10:40:00"),
-        read: false,
-      },
-      updatedAt: new Date("2024-01-25T10:40:00"),
-    },
-    {
-      id: "2",
-      participants: [user!, mockUsers[2]],
-      messages: [
-        {
-          id: "5",
-          senderId: mockUsers[2].id,
-          sender: mockUsers[2],
-          recipientId: user?.id!,
-          recipient: user!,
-          content:
-            "Hi! I would like to book a hair appointment for this weekend. Are you available?",
-          type: "text",
-          timestamp: new Date("2024-01-24T14:20:00"),
-          read: true,
-        },
-        {
-          id: "6",
-          senderId: user?.id!,
-          sender: user!,
-          recipientId: mockUsers[2].id,
-          recipient: mockUsers[2],
-          content:
-            "Hello! Yes, I have availability on Saturday. What time works best for you?",
-          type: "text",
-          timestamp: new Date("2024-01-24T14:45:00"),
-          read: true,
-        },
-      ],
-      lastMessage: {
-        id: "6",
-        senderId: user?.id!,
-        sender: user!,
-        recipientId: mockUsers[2].id,
-        recipient: mockUsers[2],
-        content:
-          "Hello! Yes, I have availability on Saturday. What time works best for you?",
-        type: "text",
-        timestamp: new Date("2024-01-24T14:45:00"),
-        read: true,
-      },
-      updatedAt: new Date("2024-01-24T14:45:00"),
-    },
-  ];
+  useEffect(() => {
+    if (user) {
+      loadConversations();
 
-  const [chats, setChats] = useState(mockChats);
+      if (hasSupabase) {
+        // Set up real-time subscription for messages
+        const messageSubscription = subscribeToMessages(user.id, (payload) => {
+          console.log("New message:", payload);
 
-  const currentChat = chats.find((chat) => chat.id === selectedChat);
-  const otherParticipant = currentChat?.participants.find(
-    (p) => p.id !== user?.id,
-  );
+          if (payload.eventType === "INSERT") {
+            const newMessage = payload.new;
+
+            // Update messages if it's for the current conversation
+            if (
+              selectedChat &&
+              (newMessage.sender_id === selectedChat ||
+                newMessage.recipient_id === selectedChat)
+            ) {
+              setMessages((prev) => [...prev, newMessage]);
+            }
+
+            // Refresh conversations to update last message and unread count
+            loadConversations();
+          }
+        });
+
+        return () => {
+          messageSubscription.unsubscribe();
+        };
+      }
+    }
+  }, [user, selectedChat]);
+
+  useEffect(() => {
+    if (selectedChat) {
+      loadMessages(selectedChat);
+    }
+  }, [selectedChat]);
 
   useEffect(() => {
     scrollToBottom();
-  }, [currentChat?.messages]);
+  }, [messages]);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const loadConversations = async () => {
+    if (!user) return;
+
+    try {
+      if (hasSupabase) {
+        const data = await getConversations(user.id);
+        setConversations(data || []);
+      } else {
+        // Mock conversations for demo
+        const mockConversations = [
+          {
+            id: mockUsers[1].id,
+            otherUser: mockUsers[1],
+            lastMessage: {
+              content:
+                "Hello! I saw your product listing for tomatoes. Are they still available?",
+              created_at: new Date().toISOString(),
+              sender_id: mockUsers[1].id,
+              read: true,
+            },
+            unreadCount: 0,
+          },
+          {
+            id: mockUsers[2].id,
+            otherUser: mockUsers[2],
+            lastMessage: {
+              content:
+                "Hi! I would like to book a hair appointment for this weekend.",
+              created_at: new Date(Date.now() - 86400000).toISOString(),
+              sender_id: mockUsers[2].id,
+              read: false,
+            },
+            unreadCount: 1,
+          },
+        ];
+        setConversations(mockConversations);
+      }
+    } catch (error) {
+      console.error("Error loading conversations:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load conversations",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const sendMessage = () => {
-    if (!messageInput.trim() || !selectedChat || !user) return;
+  const loadMessages = async (otherUserId: string) => {
+    if (!user) return;
 
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      senderId: user.id,
-      sender: user,
-      recipientId: otherParticipant?.id!,
-      recipient: otherParticipant!,
+    try {
+      if (hasSupabase) {
+        const data = await getMessages(user.id, otherUserId);
+        setMessages(data || []);
+
+        // Mark messages as read
+        const unreadMessages =
+          data
+            ?.filter((msg) => msg.recipient_id === user.id && !msg.read)
+            .map((msg) => msg.id) || [];
+
+        if (unreadMessages.length > 0) {
+          await markMessagesAsRead(unreadMessages);
+        }
+      } else {
+        // Mock messages for demo
+        const mockMessages = [
+          {
+            id: "1",
+            sender_id: otherUserId,
+            recipient_id: user.id,
+            content: "Hello! How are you?",
+            type: "text",
+            created_at: new Date(Date.now() - 3600000).toISOString(),
+            sender: mockUsers.find((u) => u.id === otherUserId),
+            recipient: user,
+            read: true,
+          },
+          {
+            id: "2",
+            sender_id: user.id,
+            recipient_id: otherUserId,
+            content: "Hi! I'm doing well, thank you!",
+            type: "text",
+            created_at: new Date(Date.now() - 1800000).toISOString(),
+            sender: user,
+            recipient: mockUsers.find((u) => u.id === otherUserId),
+            read: true,
+          },
+        ];
+        setMessages(mockMessages);
+      }
+    } catch (error) {
+      console.error("Error loading messages:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load messages",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!messageInput.trim() || !selectedChat || !user || isSending) return;
+
+    setIsSending(true);
+    const tempMessage = {
+      id: "temp-" + Date.now(),
+      sender_id: user.id,
+      recipient_id: selectedChat,
       content: messageInput.trim(),
-      type: "text",
-      timestamp: new Date(),
+      type: "text" as const,
+      created_at: new Date().toISOString(),
+      sender: user,
+      recipient: conversations.find((c) => c.id === selectedChat)?.otherUser,
       read: false,
     };
 
-    setChats((prevChats) =>
-      prevChats.map((chat) =>
-        chat.id === selectedChat
-          ? {
-              ...chat,
-              messages: [...chat.messages, newMessage],
-              lastMessage: newMessage,
-              updatedAt: new Date(),
-            }
-          : chat,
-      ),
-    );
-
+    // Optimistically add message to UI
+    setMessages((prev) => [...prev, tempMessage]);
     setMessageInput("");
+
+    try {
+      if (hasSupabase) {
+        await sendMessage({
+          sender_id: user.id,
+          recipient_id: selectedChat,
+          content: tempMessage.content,
+          type: "text",
+        });
+      } else {
+        // For demo, just keep the optimistic update
+        console.log("Demo: Message sent", tempMessage);
+      }
+    } catch (error) {
+      console.error("Error sending message:", error);
+      // Remove the optimistic message on error
+      setMessages((prev) => prev.filter((msg) => msg.id !== tempMessage.id));
+      toast({
+        title: "Error",
+        description: "Failed to send message",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      handleSendMessage();
     }
   };
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString("en-US", {
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const formatTime = (dateString: string) => {
+    return new Date(dateString).toLocaleTimeString("en-US", {
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
     });
   };
 
-  const formatDate = (date: Date) => {
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
@@ -219,16 +272,20 @@ const Chat = () => {
     }
   };
 
-  const filteredChats = chats.filter((chat) => {
+  const filteredConversations = conversations.filter((conversation) => {
     if (!searchQuery) return true;
-    const otherUser = chat.participants.find((p) => p.id !== user?.id);
     return (
-      otherUser?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      chat.lastMessage?.content
+      conversation.otherUser?.name
+        .toLowerCase()
+        .includes(searchQuery.toLowerCase()) ||
+      conversation.lastMessage?.content
         .toLowerCase()
         .includes(searchQuery.toLowerCase())
     );
   });
+
+  const currentConversation = conversations.find((c) => c.id === selectedChat);
+  const otherUser = currentConversation?.otherUser;
 
   if (!user) {
     return (
@@ -252,6 +309,15 @@ const Chat = () => {
       <Header />
 
       <div className="container mx-auto px-4 py-8">
+        {!hasSupabase && (
+          <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <p className="text-sm text-yellow-800">
+              <strong>Demo Mode:</strong> Real-time messaging requires Supabase
+              setup. Set up credentials in .env file for live chat.
+            </p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[calc(100vh-12rem)]">
           {/* Chat List */}
           <Card className="lg:col-span-1">
@@ -272,51 +338,56 @@ const Chat = () => {
             </CardHeader>
             <CardContent className="p-0">
               <ScrollArea className="h-[calc(100vh-20rem)]">
-                {filteredChats.length > 0 ? (
+                {isLoading ? (
+                  <div className="p-8 text-center">
+                    <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+                    <p className="text-muted-foreground">
+                      Loading conversations...
+                    </p>
+                  </div>
+                ) : filteredConversations.length > 0 ? (
                   <div className="space-y-1">
-                    {filteredChats.map((chat) => {
-                      const otherUser = chat.participants.find(
-                        (p) => p.id !== user.id,
-                      );
-                      const isSelected = selectedChat === chat.id;
-                      const hasUnread =
-                        chat.lastMessage &&
-                        !chat.lastMessage.read &&
-                        chat.lastMessage.senderId !== user.id;
+                    {filteredConversations.map((conversation) => {
+                      const isSelected = selectedChat === conversation.id;
+                      const hasUnread = conversation.unreadCount > 0;
 
                       return (
                         <div
-                          key={chat.id}
+                          key={conversation.id}
                           className={`p-4 cursor-pointer hover:bg-muted/50 transition-colors ${
                             isSelected ? "bg-muted" : ""
                           }`}
-                          onClick={() => setSelectedChat(chat.id)}
+                          onClick={() => setSelectedChat(conversation.id)}
                         >
                           <div className="flex items-start space-x-3">
                             <Avatar className="h-10 w-10">
                               <AvatarImage
-                                src={otherUser?.avatar}
-                                alt={otherUser?.name}
+                                src={conversation.otherUser?.avatar}
+                                alt={conversation.otherUser?.name}
                               />
                               <AvatarFallback>
-                                {otherUser?.name.charAt(0)}
+                                {conversation.otherUser?.name?.charAt(0)}
                               </AvatarFallback>
                             </Avatar>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between">
                                 <h4 className="font-medium truncate">
-                                  {otherUser?.name}
+                                  {conversation.otherUser?.name}
                                 </h4>
                                 <span className="text-xs text-muted-foreground">
-                                  {formatTime(chat.updatedAt)}
+                                  {formatTime(
+                                    conversation.lastMessage?.created_at || "",
+                                  )}
                                 </span>
                               </div>
                               <div className="flex items-center justify-between">
                                 <p className="text-sm text-muted-foreground truncate">
-                                  {chat.lastMessage?.content}
+                                  {conversation.lastMessage?.content}
                                 </p>
                                 {hasUnread && (
-                                  <Badge className="h-2 w-2 p-0 bg-primary rounded-full" />
+                                  <Badge className="h-5 w-5 p-0 bg-primary rounded-full text-xs">
+                                    {conversation.unreadCount}
+                                  </Badge>
                                 )}
                               </div>
                             </div>
@@ -339,7 +410,7 @@ const Chat = () => {
 
           {/* Chat Window */}
           <Card className="lg:col-span-3">
-            {selectedChat && currentChat ? (
+            {selectedChat && otherUser ? (
               <>
                 {/* Chat Header */}
                 <CardHeader className="border-b">
@@ -347,20 +418,18 @@ const Chat = () => {
                     <div className="flex items-center space-x-3">
                       <Avatar className="h-10 w-10">
                         <AvatarImage
-                          src={otherParticipant?.avatar}
-                          alt={otherParticipant?.name}
+                          src={otherUser.avatar}
+                          alt={otherUser.name}
                         />
                         <AvatarFallback>
-                          {otherParticipant?.name.charAt(0)}
+                          {otherUser.name?.charAt(0)}
                         </AvatarFallback>
                       </Avatar>
                       <div>
-                        <h3 className="font-medium">
-                          {otherParticipant?.name}
-                        </h3>
+                        <h3 className="font-medium">{otherUser.name}</h3>
                         <p className="text-sm text-muted-foreground capitalize">
-                          {otherParticipant?.role} •{" "}
-                          {otherParticipant?.location.area}
+                          {otherUser.role} •{" "}
+                          {otherUser.area || otherUser.location?.area}
                         </p>
                       </div>
                     </div>
@@ -382,21 +451,19 @@ const Chat = () => {
                 <CardContent className="p-0">
                   <ScrollArea className="h-[calc(100vh-25rem)] p-4">
                     <div className="space-y-4">
-                      {currentChat.messages.map((message, index) => {
-                        const isOwn = message.senderId === user.id;
+                      {messages.map((message, index) => {
+                        const isOwn = message.sender_id === user.id;
                         const showDate =
                           index === 0 ||
-                          formatDate(message.timestamp) !==
-                            formatDate(
-                              currentChat.messages[index - 1].timestamp,
-                            );
+                          formatDate(message.created_at) !==
+                            formatDate(messages[index - 1].created_at);
 
                         return (
                           <div key={message.id}>
                             {showDate && (
                               <div className="text-center my-4">
                                 <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
-                                  {formatDate(message.timestamp)}
+                                  {formatDate(message.created_at)}
                                 </span>
                               </div>
                             )}
@@ -409,11 +476,11 @@ const Chat = () => {
                                 {!isOwn && (
                                   <Avatar className="h-6 w-6 mb-1">
                                     <AvatarImage
-                                      src={message.sender.avatar}
-                                      alt={message.sender.name}
+                                      src={message.sender?.avatar}
+                                      alt={message.sender?.name}
                                     />
                                     <AvatarFallback>
-                                      {message.sender.name.charAt(0)}
+                                      {message.sender?.name?.charAt(0)}
                                     </AvatarFallback>
                                   </Avatar>
                                 )}
@@ -427,7 +494,7 @@ const Chat = () => {
                                   {message.type === "image" ? (
                                     <div className="space-y-2">
                                       <img
-                                        src={message.imageUrl}
+                                        src={message.image_url}
                                         alt="Shared image"
                                         className="rounded max-w-full h-auto"
                                       />
@@ -446,7 +513,10 @@ const Chat = () => {
                                     isOwn ? "text-right" : "text-left"
                                   }`}
                                 >
-                                  {formatTime(message.timestamp)}
+                                  {formatTime(message.created_at)}
+                                  {message.id.startsWith("temp-") && (
+                                    <span className="ml-1">Sending...</span>
+                                  )}
                                 </p>
                               </div>
                             </div>
@@ -461,10 +531,10 @@ const Chat = () => {
                 {/* Message Input */}
                 <div className="border-t p-4">
                   <div className="flex items-center space-x-2">
-                    <Button variant="ghost" size="icon">
+                    <Button variant="ghost" size="icon" disabled={isSending}>
                       <Paperclip className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon">
+                    <Button variant="ghost" size="icon" disabled={isSending}>
                       <ImageIcon className="h-4 w-4" />
                     </Button>
                     <Input
@@ -473,12 +543,17 @@ const Chat = () => {
                       onChange={(e) => setMessageInput(e.target.value)}
                       onKeyPress={handleKeyPress}
                       className="flex-1"
+                      disabled={isSending}
                     />
                     <Button
-                      onClick={sendMessage}
-                      disabled={!messageInput.trim()}
+                      onClick={handleSendMessage}
+                      disabled={!messageInput.trim() || isSending}
                     >
-                      <Send className="h-4 w-4" />
+                      {isSending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
                     </Button>
                   </div>
                 </div>

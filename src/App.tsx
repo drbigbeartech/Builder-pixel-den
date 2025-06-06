@@ -8,7 +8,9 @@ import NotFound from "./pages/NotFound";
 import Login from "./pages/auth/Login";
 import Signup from "./pages/auth/Signup";
 import CustomerDashboard from "./pages/customer/Dashboard";
+import ProductDetail from "./pages/customer/ProductDetail";
 import RetailerDashboard from "./pages/retailer/Dashboard";
+import AddProduct from "./pages/retailer/AddProduct";
 import ServiceProviderDashboard from "./pages/service-provider/Dashboard";
 import Chat from "./pages/messaging/Chat";
 
@@ -25,7 +27,9 @@ const App = () => (
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/customer" element={<CustomerDashboard />} />
+          <Route path="/product/:id" element={<ProductDetail />} />
           <Route path="/retailer" element={<RetailerDashboard />} />
+          <Route path="/retailer/add-product" element={<AddProduct />} />
           <Route
             path="/service-provider"
             element={<ServiceProviderDashboard />}
