@@ -23,8 +23,10 @@ import {
   Clock,
   ShoppingBag,
   Loader2,
+  RefreshCw,
 } from "lucide-react";
-import { getProducts, getServices } from "@/lib/database";
+import { useRealTimeProducts } from "@/lib/realtime";
+import { getServices } from "@/lib/database";
 import { hasValidSupabaseConfig } from "@/lib/supabase";
 import { mockProducts, mockServices } from "@/lib/mockData";
 import {
@@ -38,48 +40,40 @@ import { useToast } from "@/hooks/use-toast";
 const CustomerDashboard = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<Filters>({});
-  const [products, setProducts] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingServices, setIsLoadingServices] = useState(true);
   const [activeTab, setActiveTab] = useState("products");
+  const [lastRefresh, setLastRefresh] = useState(new Date());
   const user = getCurrentUser();
   const { toast } = useToast();
   const hasSupabase = hasValidSupabaseConfig();
 
+  // Use real-time products hook
+  const { products, loading: isLoadingProducts } = useRealTimeProducts({
+    ...filters,
+    query: searchQuery,
+  });
+
   useEffect(() => {
-    loadData();
+    loadServices();
   }, [filters, searchQuery]);
 
-  const loadData = async () => {
-    setIsLoading(true);
+  const loadServices = async () => {
+    setIsLoadingServices(true);
     try {
       if (hasSupabase) {
         // Use real Supabase data
-        const [productsData, servicesData] = await Promise.all([
-          getProducts({ ...filters, query: searchQuery }),
-          getServices({ ...filters, query: searchQuery }),
-        ]);
-
-        setProducts(productsData || []);
+        const servicesData = await getServices({
+          ...filters,
+          query: searchQuery,
+        });
         setServices(servicesData || []);
       } else {
         // Use mock data with client-side filtering
-        let filteredProducts = [...mockProducts];
         let filteredServices = [...mockServices];
 
         // Apply search query
         if (searchQuery) {
-          filteredProducts = filteredProducts.filter(
-            (product) =>
-              product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-              product.description
-                .toLowerCase()
-                .includes(searchQuery.toLowerCase()) ||
-              product.category
-                .toLowerCase()
-                .includes(searchQuery.toLowerCase()),
-          );
-
           filteredServices = filteredServices.filter(
             (service) =>
               service.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -94,9 +88,6 @@ const CustomerDashboard = () => {
 
         // Apply category filter
         if (filters.category && filters.category !== "All Categories") {
-          filteredProducts = filteredProducts.filter(
-            (product) => product.category === filters.category,
-          );
           filteredServices = filteredServices.filter(
             (service) => service.category === filters.category,
           );
@@ -104,11 +95,8 @@ const CustomerDashboard = () => {
 
         // Apply location filter
         if (filters.location && filters.location !== "All Areas") {
-          filteredProducts = filteredProducts.filter(
-            (product) => product.location.area === filters.location,
-          );
           filteredServices = filteredServices.filter(
-            (service) => service.location.area === filters.location,
+            (service) => service.location?.area === filters.location,
           );
         }
 
@@ -116,9 +104,6 @@ const CustomerDashboard = () => {
         if (filters.priceMin !== undefined || filters.priceMax !== undefined) {
           const minPrice = filters.priceMin || 0;
           const maxPrice = filters.priceMax || Infinity;
-          filteredProducts = filteredProducts.filter(
-            (product) => product.price >= minPrice && product.price <= maxPrice,
-          );
           filteredServices = filteredServices.filter(
             (service) => service.price >= minPrice && service.price <= maxPrice,
           );
@@ -126,18 +111,8 @@ const CustomerDashboard = () => {
 
         // Apply rating filter
         if (filters.rating) {
-          filteredProducts = filteredProducts.filter(
-            (product) => product.rating >= filters.rating!,
-          );
           filteredServices = filteredServices.filter(
             (service) => service.rating >= filters.rating!,
-          );
-        }
-
-        // Apply availability filter
-        if (filters.availability) {
-          filteredProducts = filteredProducts.filter(
-            (product) => product.availability > 0,
           );
         }
 
@@ -145,9 +120,6 @@ const CustomerDashboard = () => {
         if (filters.newArrivals) {
           const oneWeekAgo = new Date();
           oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-          filteredProducts = filteredProducts.filter(
-            (product) => product.createdAt > oneWeekAgo,
-          );
           filteredServices = filteredServices.filter(
             (service) => service.createdAt > oneWeekAgo,
           );
@@ -156,42 +128,40 @@ const CustomerDashboard = () => {
         // Apply sorting
         const sortFn = getSortFunction(filters.sortBy);
         if (sortFn) {
-          filteredProducts.sort(sortFn);
           filteredServices.sort(sortFn as any);
         }
 
-        setProducts(filteredProducts);
         setServices(filteredServices);
       }
     } catch (error: any) {
-      console.error("Error loading data:", error);
+      console.error("Error loading services:", error);
       toast({
         title: "Error",
-        description: "Failed to load marketplace data. Using demo data.",
+        description: "Failed to load services. Using demo data.",
         variant: "destructive",
       });
 
       // Fallback to mock data
-      setProducts(mockProducts);
       setServices(mockServices);
     } finally {
-      setIsLoading(false);
+      setIsLoadingServices(false);
     }
   };
 
   const getSortFunction = (sortBy?: string) => {
     switch (sortBy) {
       case "price-asc":
-        return (a: Product, b: Product) => a.price - b.price;
+        return (a: any, b: any) => a.price - b.price;
       case "price-desc":
-        return (a: Product, b: Product) => b.price - a.price;
+        return (a: any, b: any) => b.price - a.price;
       case "rating":
-        return (a: Product, b: Product) => b.rating - a.rating;
+        return (a: any, b: any) => b.rating - a.rating;
       case "newest":
-        return (a: Product, b: Product) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return (a: any, b: any) =>
+          new Date(b.createdAt || b.created_at).getTime() -
+          new Date(a.createdAt || a.created_at).getTime();
       case "popularity":
-        return (a: Product, b: Product) =>
+        return (a: any, b: any) =>
           (b.reviews?.length || 0) - (a.reviews?.length || 0);
       default:
         return null;
@@ -200,6 +170,15 @@ const CustomerDashboard = () => {
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
+  };
+
+  const handleRefresh = () => {
+    setLastRefresh(new Date());
+    loadServices();
+    toast({
+      title: "Refreshed",
+      description: "Marketplace data has been updated",
+    });
   };
 
   const renderServiceCard = (service: any) => (
@@ -254,7 +233,15 @@ const CustomerDashboard = () => {
             </span>
           </div>
 
-          <Button className="w-full">
+          <Button
+            className="w-full"
+            onClick={() => {
+              toast({
+                title: "Booking Feature",
+                description: "Service booking will be available soon!",
+              });
+            }}
+          >
             <Calendar className="h-4 w-4 mr-2" />
             Book Appointment
           </Button>
@@ -283,6 +270,31 @@ const CustomerDashboard = () => {
     );
   }
 
+  const displayProducts = hasSupabase
+    ? products
+    : searchQuery || Object.keys(filters).length > 0
+      ? mockProducts.filter((product) => {
+          const matchesSearch =
+            !searchQuery ||
+            product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            product.description
+              .toLowerCase()
+              .includes(searchQuery.toLowerCase());
+
+          const matchesCategory =
+            !filters.category ||
+            filters.category === "All Categories" ||
+            product.category === filters.category;
+
+          const matchesLocation =
+            !filters.location ||
+            filters.location === "All Areas" ||
+            product.location?.area === filters.location;
+
+          return matchesSearch && matchesCategory && matchesLocation;
+        })
+      : mockProducts;
+
   return (
     <div className="min-h-screen bg-background">
       <Header onSearch={handleSearch} />
@@ -290,19 +302,41 @@ const CustomerDashboard = () => {
       <div className="container mx-auto px-4 py-8">
         {/* Welcome Section */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">
-            Welcome back, {user.name}!
-          </h1>
-          <p className="text-muted-foreground">
-            Discover amazing products and services in{" "}
-            {user.location?.area || user.area},{" "}
-            {user.location?.city || user.city}
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold mb-2">
+                Welcome back, {user.name}!
+              </h1>
+              <p className="text-muted-foreground">
+                Discover amazing products and services in {user.area},{" "}
+                {user.city}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              onClick={handleRefresh}
+              className="flex items-center gap-2"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Refresh
+            </Button>
+          </div>
+
           {!hasSupabase && (
             <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
               <p className="text-sm text-yellow-800">
                 <strong>Demo Mode:</strong> Using mock data. Set up Supabase
                 credentials in .env file for real-time functionality.
+                {hasSupabase && " ✅ Real-time updates enabled!"}
+              </p>
+            </div>
+          )}
+
+          {hasSupabase && (
+            <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+              <p className="text-sm text-green-800">
+                <strong>Real-time Mode:</strong> Live updates enabled! Last
+                refresh: {lastRefresh.toLocaleTimeString()}
               </p>
             </div>
           )}
@@ -332,7 +366,7 @@ const CustomerDashboard = () => {
                     className="flex items-center gap-2"
                   >
                     <ShoppingBag className="h-4 w-4" />
-                    Products ({products.length})
+                    Products ({displayProducts.length})
                   </TabsTrigger>
                   <TabsTrigger
                     value="services"
@@ -343,22 +377,22 @@ const CustomerDashboard = () => {
                   </TabsTrigger>
                 </TabsList>
 
-                {isLoading && (
+                {(isLoadingProducts || isLoadingServices) && (
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading...
+                    {hasSupabase ? "Syncing..." : "Loading..."}
                   </div>
                 )}
               </div>
 
               <TabsContent value="products" className="space-y-6">
-                {!isLoading && products.length > 0 ? (
+                {displayProducts.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                    {products.map((product) => (
+                    {displayProducts.map((product) => (
                       <ProductCard key={product.id} product={product} />
                     ))}
                   </div>
-                ) : !isLoading ? (
+                ) : !isLoadingProducts ? (
                   <Card>
                     <CardContent className="flex flex-col items-center justify-center py-12">
                       <ShoppingBag className="h-12 w-12 text-muted-foreground mb-4" />
@@ -397,11 +431,11 @@ const CustomerDashboard = () => {
               </TabsContent>
 
               <TabsContent value="services" className="space-y-6">
-                {!isLoading && services.length > 0 ? (
+                {services.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {services.map(renderServiceCard)}
                   </div>
-                ) : !isLoading ? (
+                ) : !isLoadingServices ? (
                   <Card>
                     <CardContent className="flex flex-col items-center justify-center py-12">
                       <Calendar className="h-12 w-12 text-muted-foreground mb-4" />

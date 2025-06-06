@@ -7,6 +7,7 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/auth/Login";
 import Signup from "./pages/auth/Signup";
+import AuthCallback from "./pages/auth/Callback";
 import CustomerDashboard from "./pages/customer/Dashboard";
 import ProductDetail from "./pages/customer/ProductDetail";
 import RetailerDashboard from "./pages/retailer/Dashboard";
@@ -26,6 +27,7 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/customer" element={<CustomerDashboard />} />
           <Route path="/product/:id" element={<ProductDetail />} />
           <Route path="/retailer" element={<RetailerDashboard />} />

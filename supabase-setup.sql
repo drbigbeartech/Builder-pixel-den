@@ -174,96 +174,87 @@ ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies for users table
-CREATE POLICY "Users can view all profiles" ON users FOR SELECT USING (true);
-CREATE POLICY "Users can update own profile" ON users FOR UPDATE USING (auth.uid() = id);
+-- RLS Policies for users table (allow reading all users for public profiles)
+CREATE POLICY "Allow all to view user profiles" ON users FOR SELECT USING (true);
+CREATE POLICY "Users can update own profile" ON users FOR UPDATE USING (auth.uid()::text = id::text);
+CREATE POLICY "Users can insert own profile" ON users FOR INSERT WITH CHECK (auth.uid()::text = id::text);
 
 -- RLS Policies for products table
 CREATE POLICY "Anyone can view products" ON products FOR SELECT USING (true);
-CREATE POLICY "Retailers can insert own products" ON products FOR INSERT WITH CHECK (
-    EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role = 'retailer')
-);
-CREATE POLICY "Retailers can update own products" ON products FOR UPDATE USING (
-    seller_id = auth.uid()
-);
-CREATE POLICY "Retailers can delete own products" ON products FOR DELETE USING (
-    seller_id = auth.uid()
-);
+CREATE POLICY "Authenticated users can insert products" ON products FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Users can update own products" ON products FOR UPDATE USING (auth.uid()::text = seller_id::text);
+CREATE POLICY "Users can delete own products" ON products FOR DELETE USING (auth.uid()::text = seller_id::text);
 
 -- RLS Policies for services table
 CREATE POLICY "Anyone can view services" ON services FOR SELECT USING (true);
-CREATE POLICY "Service providers can insert own services" ON services FOR INSERT WITH CHECK (
-    EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role = 'service-provider')
-);
-CREATE POLICY "Service providers can update own services" ON services FOR UPDATE USING (
-    provider_id = auth.uid()
-);
-CREATE POLICY "Service providers can delete own services" ON services FOR DELETE USING (
-    provider_id = auth.uid()
-);
+CREATE POLICY "Authenticated users can insert services" ON services FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Users can update own services" ON services FOR UPDATE USING (auth.uid()::text = provider_id::text);
+CREATE POLICY "Users can delete own services" ON services FOR DELETE USING (auth.uid()::text = provider_id::text);
 
 -- RLS Policies for service_availability table
 CREATE POLICY "Anyone can view service availability" ON service_availability FOR SELECT USING (true);
 CREATE POLICY "Service providers can manage own availability" ON service_availability FOR ALL USING (
-    EXISTS (SELECT 1 FROM services WHERE id = service_id AND provider_id = auth.uid())
+    EXISTS (SELECT 1 FROM services WHERE id = service_id AND provider_id::text = auth.uid()::text)
 );
 
 -- RLS Policies for reviews table
 CREATE POLICY "Anyone can view reviews" ON reviews FOR SELECT USING (true);
-CREATE POLICY "Users can insert own reviews" ON reviews FOR INSERT WITH CHECK (user_id = auth.uid());
-CREATE POLICY "Users can update own reviews" ON reviews FOR UPDATE USING (user_id = auth.uid());
-CREATE POLICY "Users can delete own reviews" ON reviews FOR DELETE USING (user_id = auth.uid());
+CREATE POLICY "Authenticated users can insert reviews" ON reviews FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Users can update own reviews" ON reviews FOR UPDATE USING (auth.uid()::text = user_id::text);
+CREATE POLICY "Users can delete own reviews" ON reviews FOR DELETE USING (auth.uid()::text = user_id::text);
 
 -- RLS Policies for orders table
-CREATE POLICY "Customers can view own orders" ON orders FOR SELECT USING (customer_id = auth.uid());
-CREATE POLICY "Sellers can view orders for their products" ON orders FOR SELECT USING (
-    EXISTS (
-        SELECT 1 FROM order_items oi
-        JOIN products p ON oi.product_id = p.id
-        WHERE oi.order_id = orders.id AND p.seller_id = auth.uid()
-    )
-);
-CREATE POLICY "Customers can insert own orders" ON orders FOR INSERT WITH CHECK (customer_id = auth.uid());
-CREATE POLICY "Customers can update own orders" ON orders FOR UPDATE USING (customer_id = auth.uid());
+CREATE POLICY "Users can view own orders" ON orders FOR SELECT USING (auth.uid()::text = customer_id::text);
+CREATE POLICY "Users can insert own orders" ON orders FOR INSERT WITH CHECK (auth.uid()::text = customer_id::text);
+CREATE POLICY "Users can update own orders" ON orders FOR UPDATE USING (auth.uid()::text = customer_id::text);
 
 -- RLS Policies for order_items table
-CREATE POLICY "Users can view order items for accessible orders" ON order_items FOR SELECT USING (
-    EXISTS (SELECT 1 FROM orders WHERE id = order_id AND customer_id = auth.uid()) OR
-    EXISTS (
-        SELECT 1 FROM products p
-        JOIN orders o ON order_items.order_id = o.id
-        WHERE p.id = product_id AND p.seller_id = auth.uid()
-    )
+CREATE POLICY "Users can view order items for own orders" ON order_items FOR SELECT USING (
+    EXISTS (SELECT 1 FROM orders WHERE id = order_id AND customer_id::text = auth.uid()::text)
 );
-CREATE POLICY "Customers can insert order items for own orders" ON order_items FOR INSERT WITH CHECK (
-    EXISTS (SELECT 1 FROM orders WHERE id = order_id AND customer_id = auth.uid())
+CREATE POLICY "Users can insert order items for own orders" ON order_items FOR INSERT WITH CHECK (
+    EXISTS (SELECT 1 FROM orders WHERE id = order_id AND customer_id::text = auth.uid()::text)
 );
 
 -- RLS Policies for bookings table
-CREATE POLICY "Customers can view own bookings" ON bookings FOR SELECT USING (customer_id = auth.uid());
+CREATE POLICY "Users can view own bookings" ON bookings FOR SELECT USING (auth.uid()::text = customer_id::text);
 CREATE POLICY "Service providers can view bookings for their services" ON bookings FOR SELECT USING (
-    EXISTS (
-        SELECT 1 FROM services s
-        WHERE s.id = service_id AND s.provider_id = auth.uid()
-    )
+    EXISTS (SELECT 1 FROM services WHERE id = service_id AND provider_id::text = auth.uid()::text)
 );
-CREATE POLICY "Customers can insert own bookings" ON bookings FOR INSERT WITH CHECK (customer_id = auth.uid());
-CREATE POLICY "Customers can update own bookings" ON bookings FOR UPDATE USING (customer_id = auth.uid());
-CREATE POLICY "Service providers can update bookings for their services" ON bookings FOR UPDATE USING (
-    EXISTS (
-        SELECT 1 FROM services s
-        WHERE s.id = service_id AND s.provider_id = auth.uid()
-    )
-);
+CREATE POLICY "Users can insert own bookings" ON bookings FOR INSERT WITH CHECK (auth.uid()::text = customer_id::text);
+CREATE POLICY "Users can update own bookings" ON bookings FOR UPDATE USING (auth.uid()::text = customer_id::text);
 
 -- RLS Policies for messages table
 CREATE POLICY "Users can view own messages" ON messages FOR SELECT USING (
-    sender_id = auth.uid() OR recipient_id = auth.uid()
+    auth.uid()::text = sender_id::text OR auth.uid()::text = recipient_id::text
 );
-CREATE POLICY "Users can insert messages they send" ON messages FOR INSERT WITH CHECK (sender_id = auth.uid());
+CREATE POLICY "Users can insert messages they send" ON messages FOR INSERT WITH CHECK (auth.uid()::text = sender_id::text);
 CREATE POLICY "Users can update messages they received (mark as read)" ON messages FOR UPDATE USING (
-    recipient_id = auth.uid()
+    auth.uid()::text = recipient_id::text
 );
+
+-- Function to handle user creation from auth.users
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.users (id, email, name, role, city, area)
+    VALUES (
+        NEW.id,
+        NEW.email,
+        COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email),
+        COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'customer'),
+        COALESCE(NEW.raw_user_meta_data->>'city', 'Harare'),
+        COALESCE(NEW.raw_user_meta_data->>'area', 'City Center')
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger to automatically create user profile on signup
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- Insert sample data for demonstration
 INSERT INTO users (id, email, name, role, city, area, address) VALUES
@@ -289,3 +280,11 @@ INSERT INTO services (name, description, price, duration, category, provider_id)
 ('Hair Styling & Braiding', 'Professional hair styling, braiding, and treatment services.', 20.00, 120, 'Beauty & Wellness', '550e8400-e29b-41d4-a716-446655440002'),
 ('Mobile Phone Repair', 'Quick and reliable mobile phone repair services.', 25.00, 60, 'Technology', '550e8400-e29b-41d4-a716-446655440002')
 ON CONFLICT DO NOTHING;
+
+-- Enable real-time for all tables
+-- Note: Run these commands in the Supabase Dashboard under Database > Publications
+-- ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE public.bookings;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE public.products;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE public.services;
